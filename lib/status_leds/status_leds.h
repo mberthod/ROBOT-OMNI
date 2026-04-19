@@ -21,6 +21,8 @@ enum class LedMode {
     OBSTACLE,
     LISTENING,
     TRACKING,
+    ERRORTOF,
+    ERRORIMU,
     ERROR
 };
 
@@ -87,6 +89,16 @@ private:
      * @brief Animation TRACKING : orange tournant
      */
     void drawTracking();
+
+    /**
+     * @brief Animation ERROR : Violet fixe
+     */
+    void drawErrorTof();
+
+    /**
+     * @brief Animation ERROR : Orange fixe
+     */
+    void drawErrorImu();
 
     /**
      * @brief Animation ERROR : rouge fixe

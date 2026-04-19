@@ -14,17 +14,73 @@
  * @brief Initialise MPU6050 et calibre les offsets gyro (100 mesures)
  * @return true si capteur répond, false sinon
  */
-bool ImuSensor::begin() {
-    if (!imu.begin(I2C_ADDR)) {
-        Serial.printf("[ERREUR] MPU-6050 non trouvé à 0x%02X\n", I2C_ADDR);
+bool ImuSensor::begin(TwoWire& wire) {
+    // Essai à 0x68 (AD0=GND), puis 0x69 (AD0=HIGH) en fallback
+    uint8_t found_addr = 0;
+    for (uint8_t addr : {(uint8_t)0x68, (uint8_t)0x69}) {
+        wire.beginTransmission(addr);
+        if (wire.endTransmission() == 0) {
+            found_addr = addr;
+            Serial.printf("[IMU] MPU-6050 détecté à 0x%02X\n", addr);
+            break;
+        }
+    }
+
+    if (found_addr == 0) {
+        // Tentative de lecture directe du registre WHO_AM_I (0x75) pour diagnostic
+        for (uint8_t addr : {(uint8_t)0x68, (uint8_t)0x69}) {
+            wire.beginTransmission(addr);
+            wire.write(0x75);  // WHO_AM_I register
+            wire.endTransmission(false);
+            wire.requestFrom(addr, (uint8_t)1);
+            if (wire.available()) {
+                uint8_t who = wire.read();
+                Serial.printf("[IMU] WHO_AM_I à 0x%02X = 0x%02X (attendu 0x68)\n", addr, who);
+            } else {
+                Serial.printf("[IMU] Aucune réponse WHO_AM_I à 0x%02X\n", addr);
+            }
+        }
+
+        // Tentative réveil forcé (PWR_MGMT_1 = 0x00 pour sortir du sleep)
+        wire.beginTransmission(0x68);
+        wire.write(0x6B);  // PWR_MGMT_1
+        wire.write(0x00);  // clear SLEEP bit
+        uint8_t err = wire.endTransmission();
+        Serial.printf("[IMU] Réveil forcé 0x68 → err=%u\n", err);
+        if (err == 0) {
+            delay(100);
+            // Réessayer après réveil
+            wire.beginTransmission(0x68);
+            if (wire.endTransmission() == 0) {
+                found_addr = 0x68;
+                Serial.println("[IMU] MPU-6050 trouvé après réveil forcé !");
+            }
+        }
+
+        if (found_addr == 0) {
+            Serial.println("[ERREUR] MPU-6050 introuvable (0x68 et 0x69 testés)");
+            Serial.println("[CHECK]  1. VCC → 3.3V (pas 5V)");
+            Serial.println("[CHECK]  2. GND → GND");
+            Serial.println("[CHECK]  3. SDA → GPIO5 (XIAO D4)");
+            Serial.println("[CHECK]  4. SCL → GPIO6 (XIAO D5)");
+            Serial.println("[CHECK]  5. AD0 → GND (pour 0x68) ou VCC (pour 0x69)");
+            Serial.println("[CHECK]  6. Tester le module seul sur un autre µC");
+            return false;
+        }
+    }
+
+    if (!imu.begin(found_addr, &wire)) {
+        Serial.printf("[ERREUR] MPU-6050 init échoué à 0x%02X\n", found_addr);
         return false;
     }
+
     imu.setAccelerometerRange(MPU6050_RANGE_4_G);
     imu.setGyroRange(MPU6050_RANGE_500_DEG);
     imu.setFilterBandwidth(MPU6050_BAND_260_HZ);
 
     calibrate();
     last_update = millis();
+    Serial.printf("[OK] IMU initialisé @0x%02X\n", found_addr);
     return true;
 }
 

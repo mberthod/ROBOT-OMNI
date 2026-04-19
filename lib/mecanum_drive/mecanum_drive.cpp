@@ -62,21 +62,29 @@ static void setMotor(Adafruit_PWMServoDriver& pwm,
  * @brief Initialise le PCA9685 à 1000 Hz
  * @return true si PCA9685 répond
  */
-bool MecanumDrive::begin() {
-    // ── Software Reset PCA9685 ────────────────────────────────────────────────
-    // Nécessaire pour effacer EXTCLK et SLEEP bits si chip dans état corrompu.
-    // SWRST : adresse générale 0x00, commande 0x06
-    Wire.beginTransmission(0x00);
-    Wire.write(0x06);
-    Wire.endTransmission();
-    delay(10);
-    Serial.println("[PCA] SWRST envoyé");
+bool MecanumDrive::begin(TwoWire& wire) {
+    // ── Réveil ciblé PCA9685 via le Wire passé depuis main.cpp ───────────────
+    // Réveil ciblé PCA9685 via le Wire passé (déjà configuré GPIO5/6 dans main)
+    wire.beginTransmission(PCA9685_ADDR);
+    wire.write(0x00);  // MODE1
+    wire.write(0x00);  // clear SLEEP + EXTCLK
+    wire.endTransmission();
+    delay(1);
 
-    if (!pwm.begin()) {
+    wire.beginTransmission(PCA9685_ADDR);
+    wire.write(0x00);
+    wire.write(0x20);  // AI=1, SLEEP=0
+    wire.endTransmission();
+    delay(5);
+    Serial.println("[PCA] Réveil ciblé MODE1=0x20");
+
+    // Ne pas réassigner pwm : Adafruit_PWMServoDriver n'a pas de copy constructor
+    // correct → dangling pointer sur i2c_dev. Wire global déjà configuré GPIO5/6.
+    if (!pwm.begin(0)) {
         Serial.printf("[ERREUR] PCA9685 non trouvé à 0x%02X\n", PCA9685_ADDR);
         return false;
     }
-    pwm.setOscillatorFrequency(25000000);  // oscillateur interne PCA9685 = 25 MHz
+    pwm.setOscillatorFrequency(25000000);
     pwm.setPWMFreq(PWM_FREQ_HZ);
     stop();
     Serial.printf("[OK] PCA9685 @0x%02X — %u Hz\n", PCA9685_ADDR, PWM_FREQ_HZ);

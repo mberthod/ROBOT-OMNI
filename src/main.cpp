@@ -8,13 +8,104 @@
 
 #include <Arduino.h>
 #include "mecanum_drive.h"
-#include "tof_sensor.h"  // Changé pour utiliser un seul capteur
+#include "tof_sensor.h"  // Un seul capteur TOF (tof_sensor.cpp)
 #include "imu_sensor.h"
 #include "status_leds.h"
 #include "web_server.h"
 #include "wifi_location.h"
 #include "voice_control.h"
 #include "object_tracker.h"
+
+// ─── Table d'identification des devices I2C connus ────────────────────────────
+struct I2cDevice {
+    uint8_t addr;
+    const char* name;
+};
+
+static const I2cDevice KNOWN_DEVICES[] = {
+    { 0x29, "VL53L1X (TOF, adresse defaut)"      },
+    { 0x30, "VL53L1X TOF #1"                     },
+    { 0x31, "VL53L1X TOF #2"                     },
+    { 0x32, "VL53L1X TOF #3"                     },
+    { 0x40, "PCA9685 (moteurs)"                   },
+    { 0x41, "PCA9685 (A0=1)"                      },
+    { 0x48, "ADS1115 / TMP102"                    },
+    { 0x57, "MAX30102 (SpO2)"                     },
+    { 0x60, "MPL3115 (baro)"                      },
+    { 0x68, "MPU-6050 IMU (AD0=GND)"             },
+    { 0x69, "MPU-6050 IMU (AD0=VCC)"             },
+    { 0x70, "PCA9685 ALL CALL / TCA9548A"         },
+    { 0x76, "BMP280 / BME280 (SDO=GND)"          },
+    { 0x77, "BMP280 / BME280 (SDO=VCC)"          },
+};
+
+static const char* i2c_identify(uint8_t addr) {
+    for (const auto& d : KNOWN_DEVICES) {
+        if (d.addr == addr) return d.name;
+    }
+    return "device inconnu";
+}
+
+/**
+ * @brief Scan I2C complet 0x00→0x7F avec tableau visuel et identification
+ */
+static void i2c_scan() {
+    Serial.println("\n╔══════════════════════════════════════════╗");
+    Serial.println(  "║         SCAN I2C  0x00 → 0x7F           ║");
+    Serial.println(  "╠══════════════════════════════════════════╣");
+
+    // En-tête colonne
+    Serial.print("     ");
+    for (uint8_t col = 0; col < 16; col++) {
+        Serial.printf(" .%X", col);
+    }
+    Serial.println();
+
+    uint8_t found = 0;
+    char found_list[32][32];  // max 32 devices
+
+    for (uint8_t row = 0; row < 8; row++) {
+        Serial.printf("0x%X0 ", row);
+        for (uint8_t col = 0; col < 16; col++) {
+            uint8_t addr = (row << 4) | col;
+
+            // Adresses réservées I2C (0x00–0x07 et 0x78–0x7F)
+            if (addr < 0x08 || addr > 0x77) {
+                Serial.print("  --");
+                continue;
+            }
+
+            Wire.beginTransmission(addr);
+            uint8_t err = Wire.endTransmission();
+
+            if (err == 0) {
+                Serial.printf("  %02X", addr);
+                snprintf(found_list[found], 32, "0x%02X", addr);
+                found++;
+            } else {
+                Serial.print("  ..");
+            }
+        }
+        Serial.println();
+    }
+
+    Serial.println("╠══════════════════════════════════════════╣");
+
+    if (found == 0) {
+        Serial.println("║  ⚠️  AUCUN device trouvé                 ║");
+        Serial.println("║  Vérifier SDA=GPIO5 SCL=GPIO6 et alim   ║");
+    } else {
+        Serial.printf( "║  %u device(s) détecté(s) :               ║\n", found);
+        Serial.println("╠══════════════════════════════════════════╣");
+        for (uint8_t i = 0; i < found; i++) {
+            // Re-scanner pour récupérer l'adresse (depuis found_list)
+            uint8_t addr = (uint8_t)strtol(found_list[i], nullptr, 16);
+            Serial.printf("║  %-5s → %-32s║\n", found_list[i], i2c_identify(addr));
+        }
+    }
+
+    Serial.println("╚══════════════════════════════════════════╝\n");
+}
 
 // ─── Config réseau ────────────────────────────────────────────────────────────
 static constexpr char WIFI_SSID[]     = "TP-Link_B150";
@@ -29,7 +120,7 @@ static bool hw_voice   = false;
 
 // ─── Instances globales ───────────────────────────────────────────────────────
 static MecanumDrive  mecanum;
-static TofSensors    tof;
+static TofSensor    tof;  // Un seul capteur
 static ImuSensor     imu;
 static StatusLeds    leds;
 static WebServer     web;
@@ -63,46 +154,35 @@ void setup() {
     leds.update();
 
     // 2. Moteurs via PCA9685 (I2C 0x40)
-    Wire.begin(5, 6);  // SDA=GPIO5, SCL=GPIO6 XIAO ESP32S3
+    // ── Bus I2C — configuré ICI UNE SEULE FOIS, pins passés aux modules ────────
+    Wire.begin(5, 6);      // SDA=GPIO5, SCL=GPIO6  (XIAO ESP32S3 D4/D5)
+    Wire.setClock(50000);  // 50 kHz pour debug (passer à 400kHz en prod)
+    // ─────────────────────────────────────────────────────────────────────────
 
-    // ── Scan I2C pour confirmer les périphériques présents ──────────────────
-    Serial.println("[I2C] Scan du bus...");
-    uint8_t found = 0;
-    for (uint8_t addr = 1; addr < 127; addr++) {
-        Wire.beginTransmission(addr);
-        if (Wire.endTransmission() == 0) {
-            Serial.printf("[I2C] Périphérique trouvé à 0x%02X\n", addr);
-            found++;
-        }
-    }
-    if (found == 0) Serial.println("[I2C] AUCUN périphérique trouvé — vérifier câblage SDA/SCL");
-    // ────────────────────────────────────────────────────────────────────────
+    i2c_scan();           // scan complet avant toute init module
+    delay(50);            // laisser le bus I2C se stabiliser après le scan
 
-    if (!mecanum.begin()) {
+    /*if (!mecanum.begin(Wire)) {
         Serial.println("[ERREUR] PCA9685 absent — arrêt");
         leds.setMode(LedMode::ERROR);
         while (1) { leds.update(); delay(100); }
     }
     Serial.println("[OK] MecanumDrive");
+*/
+    // 3. ToF VL53L1X — Wire injecté depuis main
+    hw_tof = tof.begin(Wire);
+    if (!hw_tof) Serial.println("[WARN] TOF absent, évitement désactivé");
+    else         Serial.println("[OK] TofSensor");
 
-    // 3. ToF VL53L1X (décommenter quand branché)
-    /*
-    hw_tof = tof.begin();
-    if (!hw_tof) Serial.println("[WARN] TOF absents, évitement désactivé");
-    else         Serial.println("[OK] TofSensors");
-    */
-
-    // 4. IMU MPU-6050 (décommenter quand branché)
-    /*
-    hw_imu = imu.begin();
+    // 4. IMU MPU-6050 — Wire injecté depuis main
+    hw_imu = imu.begin(Wire);
     if (!hw_imu) Serial.println("[WARN] IMU absent, angles désactivés");
     else         Serial.println("[OK] ImuSensor");
-    */
 
     // 5. Serveur web
-    // Coordonnées polaires : jx = composante latérale (vy), jy = avant/arrière (vx)
+    // Coordonnées polaires : jx = vx (latéral), jy = vy (avant/arrière)
     web.setCommandCallback([](float vx, float vy, float wz) {
-        mecanum.setVelocityPolar(vy, vx, wz);
+        mecanum.setVelocityPolar(vx, vy, wz);
     });
     if (!web.begin(WIFI_SSID, WIFI_PASSWORD)) {
         Serial.println("[WARN] WiFi non connecté, serveur web désactivé");
@@ -131,14 +211,13 @@ void setup() {
 static uint32_t last_sensor_send = 0;
 
 void loop() {
-    // Évitement obstacle (seulement si TOF branché)
+    // Évitement obstacle (TOF branché)
     if (hw_tof) {
-        uint16_t front, left, right;
-        if (tof.readAll(&front, &left, &right)) {
-            if (front < 200 || left < 200 || right < 200) {
-                leds.setMode(LedMode::OBSTACLE);
-                mecanum.stop();
-            }
+        uint16_t dist;
+        tof.readDistance(&dist);
+        if (dist < 200) {
+            leds.setMode(LedMode::OBSTACLE);
+            mecanum.stop();
         }
     }
 
@@ -157,11 +236,11 @@ void loop() {
 
     // Télémétrie web toutes les 500ms
     if (millis() - last_sensor_send > 500) {
-        uint16_t f = 9999, l = 9999, r = 9999;
-        float roll = 0.0f, pitch = 0.0f;
-        if (hw_tof) tof.readAll(&f, &l, &r);
-        if (hw_imu) { roll = imu.getRoll(); pitch = imu.getPitch(); }
-        web.sendSensorData(f, l, r, roll, pitch);
+        uint16_t f = hw_tof ? 9999 : 0;  // 0 si TOF absent (pour éviter les valeurs invalides)
+        float roll = hw_imu ? imu.getRoll() : 0.0f;
+        float pitch = hw_imu ? imu.getPitch() : 0.0f;
+        if (hw_tof) tof.readDistance(&f);
+        web.sendSensorData(f, 0, 0, roll, pitch);
         last_sensor_send = millis();
     }
 

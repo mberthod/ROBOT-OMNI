@@ -56,6 +56,12 @@ void StatusLeds::update() {
         case LedMode::TRACKING:
             drawTracking();
             break;
+        case LedMode::ERRORTOF:
+            drawErrorTof();
+            break;
+        case LedMode::ERRORIMU:
+            drawErrorImu();
+            break;    
         case LedMode::ERROR:
             drawError();
             break;
@@ -138,6 +144,22 @@ void StatusLeds::drawTracking() {
     leds[(offset + 2) % NUM_LEDS] = CRGB::Orange;
 }
 
+/**
+ * @brief Animation ERROR : rouge fixe
+ */
+void StatusLeds::drawErrorTof() {
+    for (uint8_t i = 0; i < NUM_LEDS; i++) {
+        leds[i] = CRGB::Purple;
+    }
+}
+/**
+ * @brief Animation ERROR : rouge fixe
+ */
+void StatusLeds::drawErrorImu() {
+    for (uint8_t i = 0; i < NUM_LEDS; i++) {
+        leds[i] = CRGB::Orange1;
+    }
+}
 /**
  * @brief Animation ERROR : rouge fixe
  */

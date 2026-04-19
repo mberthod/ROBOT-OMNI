@@ -9,6 +9,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include <Wire.h>
 #include <Adafruit_MPU6050.h>
 
 /**
@@ -19,9 +20,10 @@ class ImuSensor {
 public:
     /**
      * @brief Initialise MPU6050 et calibre les offsets gyro (100 mesures)
+     * @param wire Bus I2C déjà configuré dans main.cpp
      * @return true si capteur répond, false sinon
      */
-    bool begin();
+    bool begin(TwoWire& wire = Wire);
 
     /**
      * @brief Met à jour les angles roll/pitch via filtre complémentaire

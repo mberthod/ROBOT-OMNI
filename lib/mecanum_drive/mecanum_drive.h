@@ -9,6 +9,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
 
 /**
@@ -18,10 +19,11 @@
 class MecanumDrive {
 public:
     /**
-     * @brief Initialise le PCA9685 à 1000 Hz (SWRST inclus)
+     * @brief Initialise le PCA9685 à 1000 Hz
+     * @param wire Bus I2C déjà configuré dans main.cpp
      * @return true si PCA9685 répond sur I2C
      */
-    bool begin();
+    bool begin(TwoWire& wire = Wire);
 
     /**
      * @brief Cinématique Mecanum cartésienne classique
@@ -57,5 +59,7 @@ private:
     static constexpr uint8_t  PCA9685_ADDR = 0x40;
     static constexpr uint16_t PWM_FREQ_HZ  = 1000;
 
-    Adafruit_PWMServoDriver pwm{PCA9685_ADDR};
+    // Wire global utilisé directement — pas de réassignation dans begin()
+    // (Adafruit_PWMServoDriver n'a pas de copy constructor correct)
+    Adafruit_PWMServoDriver pwm{PCA9685_ADDR};  // utilise Wire global
 };
