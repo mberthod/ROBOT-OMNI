@@ -1,0 +1,11 @@
+{
+  "name": "wifi_location",
+  "version": "1.0.0",
+  "description": "Géolocalisation par RSSI WiFi via weighted centroid",
+  "keywords": "wifi, rssi, location",
+  "authors": {
+    "name": "Robot Omni",
+    "email": "info@robotomni.com"
+  },
+  "frameworks": "arduino"
+}

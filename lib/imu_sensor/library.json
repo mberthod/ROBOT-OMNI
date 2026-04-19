@@ -1,0 +1,14 @@
+{
+  "name": "imu_sensor",
+  "version": "1.0.0",
+  "description": "Driver pour MPU-6050 avec calibration gyro et calcul angles",
+  "keywords": "imu, mpu6050, orientation",
+  "authors": {
+    "name": "Robot Omni",
+    "email": "info@robotomni.com"
+  },
+  "frameworks": "arduino",
+  "dependencies": {
+    "adafruit/Adafruit MPU6050": "^2.2.6"
+  }
+}

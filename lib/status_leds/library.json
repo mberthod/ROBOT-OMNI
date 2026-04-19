@@ -1,0 +1,14 @@
+{
+  "name": "status_leds",
+  "version": "1.0.0",
+  "description": "Driver pour WS2812B avec modes d'animation pour l'état robot",
+  "keywords": "leds, ws2812b, fastled",
+  "authors": {
+    "name": "Robot Omni",
+    "email": "info@robotomni.com"
+  },
+  "frameworks": "arduino",
+  "dependencies": {
+    "fastled/FastLED": "^3.7.0"
+  }
+}

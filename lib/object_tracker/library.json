@@ -1,0 +1,11 @@
+{
+  "name": "object_tracker",
+  "version": "1.0.0",
+  "description": "Suivi d'objet par couleur via caméra OV2640",
+  "keywords": "camera, ov2640, tracking",
+  "authors": {
+    "name": "Robot Omni",
+    "email": "info@robotomni.com"
+  },
+  "frameworks": "arduino"
+}

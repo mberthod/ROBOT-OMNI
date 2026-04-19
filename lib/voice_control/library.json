@@ -1,0 +1,11 @@
+{
+  "name": "voice_control",
+  "version": "1.0.0",
+  "description": "Contrôle vocal avec Edge Impulse sur micro PDM",
+  "keywords": "voice, i2s, edge-impulse",
+  "authors": {
+    "name": "Robot Omni",
+    "email": "info@robotomni.com"
+  },
+  "frameworks": "arduino"
+}

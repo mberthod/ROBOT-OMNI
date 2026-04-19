@@ -1,0 +1,14 @@
+{
+  "name": "mecanum_drive",
+  "version": "1.0.0",
+  "description": "Driver pour contrôle 4 roues Mecanum avec PCA9685",
+  "keywords": "mecanum, pca9685, robot",
+  "authors": {
+    "name": "Robot Omni",
+    "email": "info@robotomni.com"
+  },
+  "frameworks": "arduino",
+  "dependencies": {
+    "adafruit/Adafruit PWM Servo Driver Library": "^3.0.1"
+  }
+}

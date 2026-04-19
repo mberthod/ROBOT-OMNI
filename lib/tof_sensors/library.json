@@ -1,0 +1,14 @@
+{
+  "name": "tof_sensors",
+  "version": "1.0.0",
+  "description": "Driver pour 3 capteurs VL53L1X ToF avec gestion XSHUT",
+  "keywords": "tof, vl53l1x, distance",
+  "authors": {
+    "name": "Robot Omni",
+    "email": "info@robotomni.com"
+  },
+  "frameworks": "arduino",
+  "dependencies": {
+    "pololu/VL53L1X": "^1.3.1"
+  }
+}
