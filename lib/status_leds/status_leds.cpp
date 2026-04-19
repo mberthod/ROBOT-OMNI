@@ -1,6 +1,6 @@
 /**
  * @file status_leds.cpp
- * @brief Implémentation des LEDs WS2812B
+ * @brief Animations WS2812B — visuellement distinctives par mode
  * @author Mathieu (Robot Omni)
  * @date 17/04/2026
  * @version 1.0
@@ -9,162 +9,106 @@
 #include "status_leds.h"
 #include <FastLED.h>
 
-/**
- * @brief Initialise les LEDs WS2812B
- */
 void StatusLeds::begin() {
     FastLED.addLeds<WS2812B, LED_PIN, GRB>(leds, NUM_LEDS);
     FastLED.setBrightness(brightness);
-    setMode(LedMode::IDLE);
+    fill_solid(leds, NUM_LEDS, CRGB::Black);
+    FastLED.show();
 }
 
-/**
- * @brief Change le mode d'animation
- * @param mode Mode à appliquer
- */
 void StatusLeds::setMode(LedMode mode) {
-    current_mode = mode;
-    last_mode_change = millis();
+    if (mode != current_mode) {
+        current_mode     = mode;
+        last_mode_change = millis();
+        // Effacer immédiatement pour transition nette
+        fill_solid(leds, NUM_LEDS, CRGB::Black);
+    }
 }
 
-/**
- * @brief Définit la luminosité globale
- * @param val Valeur 0..255
- */
 void StatusLeds::setBrightness(uint8_t val) {
     brightness = constrain(val, 10, 255);
     FastLED.setBrightness(brightness);
 }
 
-/**
- * @brief Met à jour les animations (appeler dans loop())
- */
 void StatusLeds::update() {
     switch (current_mode) {
-        case LedMode::IDLE:
-            drawIdle();
-            break;
-        case LedMode::MOVING:
-            drawMoving();
-            break;
-        case LedMode::OBSTACLE:
-            drawObstacle();
-            break;
-        case LedMode::LISTENING:
-            drawListening();
-            break;
-        case LedMode::TRACKING:
-            drawTracking();
-            break;
-        case LedMode::ERRORTOF:
-            drawErrorTof();
-            break;
-        case LedMode::ERRORIMU:
-            drawErrorImu();
-            break;    
-        case LedMode::ERROR:
-            drawError();
-            break;
+        case LedMode::IDLE:      drawIdle();      break;
+        case LedMode::MOVING:    drawMoving();    break;
+        case LedMode::OBSTACLE:  drawObstacle();  break;
+        case LedMode::LISTENING: drawListening(); break;
+        case LedMode::TRACKING:  drawTracking();  break;
+        case LedMode::ERRORTOF:  drawErrorTof();  break;
+        case LedMode::ERRORIMU:  drawErrorImu();  break;
+        case LedMode::ERROR:     drawError();     break;
     }
-
     FastLED.show();
-    last_update = millis();
 }
 
-/**
- * @brief Animation IDLE : rotation lente bleu
- */
+// ─── IDLE : pulsation bleue lente (respiration) ──────────────────────────────
 void StatusLeds::drawIdle() {
-    uint32_t now = millis();
-    uint8_t offset = (now / 200) % NUM_LEDS;
-
-    for (uint8_t i = 0; i < NUM_LEDS; i++) {
-        leds[i] = CRGB::Black;
-    }
-
-    leds[offset] = CRGB::Blue;
-    leds[(offset + 1) % NUM_LEDS] = CRGB::Blue;
+    // Respiration : sin8 sur 4 secondes cycle
+    uint8_t breath = sin8(millis() / 16);   // 0→255 en ~4s
+    uint8_t val    = map(breath, 0, 255, 20, 200);
+    fill_solid(leds, NUM_LEDS, CHSV(160, 255, val));  // bleu
 }
 
-/**
- * @brief Animation MOVING : vert fixe, intensité proportionnelle
- * @param speed Niveau de vitesse (0..100)
- */
+// ─── MOVING : vert plein fixe ────────────────────────────────────────────────
 void StatusLeds::drawMoving(uint8_t speed) {
-    uint8_t scale = map(speed, 0, 100, 32, 255);
-    for (uint8_t i = 0; i < NUM_LEDS; i++) {
-        leds[i] = CRGB(scale * 2, scale, scale * 2);
-    }
+    uint8_t bright = map(speed, 0, 100, 80, 255);
+    fill_solid(leds, NUM_LEDS, CHSV(96, 255, bright)); // vert
 }
 
-/**
- * @brief Animation OBSTACLE : rouge clignotant rapide
- */
+// ─── OBSTACLE : stroboscope rouge très rapide ─────────────────────────────────
+// 50ms ON / 50ms OFF — bien plus visible que 100ms
 void StatusLeds::drawObstacle() {
     uint32_t now = millis();
-    if ((now / 100) % 2 == 0) {
-        for (uint8_t i = 0; i < NUM_LEDS; i++) {
-            leds[i] = CRGB::Red;
-        }
+    if ((now / 50) % 2 == 0) {
+        fill_solid(leds, NUM_LEDS, CRGB::Red);
     } else {
-        for (uint8_t i = 0; i < NUM_LEDS; i++) {
-            leds[i] = CRGB::Black;
-        }
+        fill_solid(leds, NUM_LEDS, CRGB::Black);
     }
 }
 
-/**
- * @brief Animation LISTENING : pulsation cyan lente
- */
+// ─── LISTENING : pulsation cyan lente ────────────────────────────────────────
 void StatusLeds::drawListening() {
-    uint32_t now = millis();
-    uint8_t beats = sin8(beat8(20));
-    uint8_t val = map(beats, 0, 255, 64, 192);
-
-    CRGB color = CHSV(96, 255, val);  // Cyan
-
-    for (uint8_t i = 0; i < NUM_LEDS; i++) {
-        leds[i] = color;
-    }
+    uint8_t breath = sin8(millis() / 8);   // cycle ~2s
+    uint8_t val    = map(breath, 0, 255, 40, 220);
+    fill_solid(leds, NUM_LEDS, CHSV(128, 255, val)); // cyan
 }
 
-/**
- * @brief Animation TRACKING : orange tournant
- */
+// ─── TRACKING : comète orange tournante ──────────────────────────────────────
 void StatusLeds::drawTracking() {
-    uint32_t now = millis();
-    uint8_t offset = (now / 100) % NUM_LEDS;
-
-    for (uint8_t i = 0; i < NUM_LEDS; i++) {
-        leds[i] = CRGB::Black;
+    fill_solid(leds, NUM_LEDS, CRGB::Black);
+    uint8_t head = (millis() / 80) % NUM_LEDS;   // tour en ~640ms
+    for (uint8_t i = 0; i < 4; i++) {
+        uint8_t idx    = (head + NUM_LEDS - i) % NUM_LEDS;
+        uint8_t bright = 255 - (i * 55);
+        leds[idx] = CHSV(20, 255, bright);  // orange décroissant
     }
-
-    leds[offset] = CRGB::Orange;
-    leds[(offset + 1) % NUM_LEDS] = CRGB::OrangeRed;
-    leds[(offset + 2) % NUM_LEDS] = CRGB::Orange;
 }
 
-/**
- * @brief Animation ERROR : rouge fixe
- */
+// ─── ERRORTOF : violet SOS (3 courts 3 longs 3 courts) ───────────────────────
 void StatusLeds::drawErrorTof() {
-    for (uint8_t i = 0; i < NUM_LEDS; i++) {
-        leds[i] = CRGB::Purple;
+    // Clignotement irrégulier à 150ms pour distinguer de ERROR (rouge fixe)
+    uint32_t now = millis();
+    if ((now / 150) % 2 == 0) {
+        fill_solid(leds, NUM_LEDS, CRGB::Purple);
+    } else {
+        fill_solid(leds, NUM_LEDS, CRGB::Black);
     }
 }
-/**
- * @brief Animation ERROR : rouge fixe
- */
+
+// ─── ERRORIMU : orange clignotant lent ───────────────────────────────────────
 void StatusLeds::drawErrorImu() {
-    for (uint8_t i = 0; i < NUM_LEDS; i++) {
-        leds[i] = CRGB::Orange1;
+    uint32_t now = millis();
+    if ((now / 400) % 2 == 0) {
+        fill_solid(leds, NUM_LEDS, CRGB::OrangeRed);
+    } else {
+        fill_solid(leds, NUM_LEDS, CRGB::Black);
     }
 }
-/**
- * @brief Animation ERROR : rouge fixe
- */
+
+// ─── ERROR : rouge fixe (halt système) ───────────────────────────────────────
 void StatusLeds::drawError() {
-    for (uint8_t i = 0; i < NUM_LEDS; i++) {
-        leds[i] = CRGB::Red;
-    }
+    fill_solid(leds, NUM_LEDS, CRGB::Red);
 }

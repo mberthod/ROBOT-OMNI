@@ -8,6 +8,7 @@
 
 #include "mecanum_drive.h"
 #include <Wire.h>
+#include "i2c_mutex.h"
 
 // ─── Correspondance canaux PCA9685 ───────────────────────────────────────────
 // MX1508 : avancer = IN1(fwd)=PWM, IN2(rev)=0
@@ -46,6 +47,7 @@ static void setMotor(Adafruit_PWMServoDriver& pwm,
     uint16_t duty = static_cast<uint16_t>(fabsf(spd) * MAX);
     duty = min(duty, MAX);
 
+    // Pas de mutex ici — appelé depuis setVelocity/stop qui acquièrent déjà le mutex
     if (spd > 0.01f) {
         pwm.setPWM(fwd, 0, duty);
         pwm.setPWM(rev, 0, 0);
@@ -98,23 +100,21 @@ bool MecanumDrive::begin(TwoWire& wire) {
  * @param wz Rotation       [-1.0, +1.0]
  */
 void MecanumDrive::setVelocity(float vx, float vy, float wz) {
-    // Cinématique 4 roues Mecanum
     float fl =  vx - vy - wz;
     float fr =  vx + vy + wz;
     float rl =  vx + vy - wz;
     float rr =  vx - vy + wz;
 
-    // Normalisation pour ne jamais dépasser [-1, +1]
     float peak = max({fabsf(fl), fabsf(fr), fabsf(rl), fabsf(rr), 1.0f});
-    fl /= peak;
-    fr /= peak;
-    rl /= peak;
-    rr /= peak;
+    fl /= peak; fr /= peak; rl /= peak; rr /= peak;
 
-    setMotor(pwm, CH_FL_FWD, CH_FL_REV, fl);
-    setMotor(pwm, CH_RL_FWD, CH_RL_REV, rl);
-    setMotor(pwm, CH_FR_FWD, CH_FR_REV, fr);
-    setMotor(pwm, CH_RR_FWD, CH_RR_REV, rr);
+    if (g_i2c_mutex && I2C_LOCK(20)) {
+        setMotor(pwm, CH_FL_FWD, CH_FL_REV, fl);
+        setMotor(pwm, CH_RL_FWD, CH_RL_REV, rl);
+        setMotor(pwm, CH_FR_FWD, CH_FR_REV, fr);
+        setMotor(pwm, CH_RR_FWD, CH_RR_REV, rr);
+        I2C_UNLOCK();
+    }
 }
 
 /**
@@ -161,17 +161,23 @@ void MecanumDrive::setVelocityPolar(float jx, float jy, float wz) {
         rr /= peak;
     }
 
-    setMotor(pwm, CH_FL_FWD, CH_FL_REV, fl);
-    setMotor(pwm, CH_RL_FWD, CH_RL_REV, rl);
-    setMotor(pwm, CH_FR_FWD, CH_FR_REV, fr);
-    setMotor(pwm, CH_RR_FWD, CH_RR_REV, rr);
+    if (g_i2c_mutex && I2C_LOCK(20)) {
+        setMotor(pwm, CH_FL_FWD, CH_FL_REV, fl);
+        setMotor(pwm, CH_RL_FWD, CH_RL_REV, rl);
+        setMotor(pwm, CH_FR_FWD, CH_FR_REV, fr);
+        setMotor(pwm, CH_RR_FWD, CH_RR_REV, rr);
+        I2C_UNLOCK();
+    }
 }
 
 /**
- * @brief Arrête tous les moteurs (roue libre)
+ * @brief Arrête tous les moteurs (roue libre) — protégé mutex I2C
  */
 void MecanumDrive::stop() {
-    for (uint8_t ch = 0; ch < 8; ch++) {
-        pwm.setPWM(ch, 0, 0);
+    if (g_i2c_mutex && I2C_LOCK(20)) {
+        for (uint8_t ch = 0; ch < 8; ch++) {
+            pwm.setPWM(ch, 0, 0);
+        }
+        I2C_UNLOCK();
     }
 }

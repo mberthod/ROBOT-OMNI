@@ -7,14 +7,18 @@
  */
 
 #include <Arduino.h>
+#include "i2c_mutex.h"      // Mutex I2C partagé — doit être en premier
 #include "mecanum_drive.h"
-#include "tof_sensor.h"  // Un seul capteur TOF (tof_sensor.cpp)
+#include "tof_sensor.h"
 #include "imu_sensor.h"
 #include "status_leds.h"
 #include "web_server.h"
 #include "wifi_location.h"
 #include "voice_control.h"
 #include "object_tracker.h"
+
+// ─── Mutex I2C global — défini ici, extern dans i2c_mutex.h ──────────────────
+SemaphoreHandle_t g_i2c_mutex = nullptr;
 
 // ─── Table d'identification des devices I2C connus ────────────────────────────
 struct I2cDevice {
@@ -111,6 +115,12 @@ static void i2c_scan() {
 static constexpr char WIFI_SSID[]     = "TP-Link_B150";
 static constexpr char WIFI_PASSWORD[] = "12902637";
 
+// IP statique — évite que l'adresse change à chaque redémarrage
+// Adapter gateway à ton routeur (souvent 192.168.0.1 ou 192.168.1.1)
+static const IPAddress STATIC_IP     (192, 168, 0,   120);
+static const IPAddress GATEWAY_IP    (192, 168, 0,   1  );
+static const IPAddress SUBNET_MASK   (255, 255, 255, 0  );
+
 // ─── Flags hardware présent ───────────────────────────────────────────────────
 // Passer à true quand le composant est branché et initialisé avec succès
 static bool hw_tof     = false;
@@ -156,39 +166,40 @@ void setup() {
     // 2. Moteurs via PCA9685 (I2C 0x40)
     // ── Bus I2C — configuré ICI UNE SEULE FOIS, pins passés aux modules ────────
     Wire.begin(5, 6);      // SDA=GPIO5, SCL=GPIO6  (XIAO ESP32S3 D4/D5)
-    Wire.setClock(50000);  // 50 kHz pour debug (passer à 400kHz en prod)
+    Wire.setClock(50000);  // 50 kHz pour debug
+
+    // ── Mutex I2C — créé AVANT tout module qui utilise le bus ────────────────
+    g_i2c_mutex = xSemaphoreCreateMutex();
     // ─────────────────────────────────────────────────────────────────────────
 
-    i2c_scan();           // scan complet avant toute init module
-    delay(50);            // laisser le bus I2C se stabiliser après le scan
+    i2c_scan();
+    delay(50);
 
-    /*if (!mecanum.begin(Wire)) {
+    // 2. Moteurs
+    if (!mecanum.begin(Wire)) {
         Serial.println("[ERREUR] PCA9685 absent — arrêt");
         leds.setMode(LedMode::ERROR);
         while (1) { leds.update(); delay(100); }
     }
     Serial.println("[OK] MecanumDrive");
-*/
-    // 3. ToF VL53L1X — Wire injecté depuis main
+
+    // 3. ToF VL53L0X — tâche FreeRTOS Core 0
     hw_tof = tof.begin(Wire);
     if (!hw_tof) Serial.println("[WARN] TOF absent, évitement désactivé");
     else         Serial.println("[OK] TofSensor");
 
-    // 4. IMU MPU-6050 — Wire injecté depuis main
+    // 4. IMU MPU-6050
     hw_imu = imu.begin(Wire);
     if (!hw_imu) Serial.println("[WARN] IMU absent, angles désactivés");
     else         Serial.println("[OK] ImuSensor");
+
 
     // 5. Serveur web
     // Coordonnées polaires : jx = vx (latéral), jy = vy (avant/arrière)
     web.setCommandCallback([](float vx, float vy, float wz) {
         mecanum.setVelocityPolar(vx, vy, wz);
     });
-    if (!web.begin(WIFI_SSID, WIFI_PASSWORD)) {
-        Serial.println("[WARN] WiFi non connecté, serveur web désactivé");
-    } else {
-        Serial.println("[OK] WebServer");
-    }
+    web.begin(WIFI_SSID, WIFI_PASSWORD, STATIC_IP, GATEWAY_IP, SUBNET_MASK);
 
     // 6. Voix PDM (décommenter quand Edge Impulse importé)
     /*
@@ -209,41 +220,65 @@ void setup() {
 
 // ─── loop() ──────────────────────────────────────────────────────────────────
 static uint32_t last_sensor_send = 0;
+static uint32_t last_log_ms      = 0;
+static bool     obstacle_active  = false;   // état obstacle précédent
 
 void loop() {
-    // Évitement obstacle (TOF branché)
+    // ── 1. Lecture TOF + machine d'état obstacle ─────────────────────────────
     if (hw_tof) {
-        uint16_t dist;
-        tof.readDistance(&dist);
-        if (dist < 200) {
-            leds.setMode(LedMode::OBSTACLE);
-            mecanum.stop();
+        uint16_t dist = 9999;
+        bool valid = tof.readDistance(&dist);
+
+        if (valid && dist < 200) {
+            // Nouvel obstacle détecté
+            if (!obstacle_active) {
+                obstacle_active = true;
+                leds.setMode(LedMode::OBSTACLE);
+                mecanum.stop();
+                Serial.printf("[OBSTACLE] Détecté ! distance=%u mm — moteurs arrêtés\n", dist);
+            }
+        } else {
+            // Obstacle levé
+            if (obstacle_active) {
+                obstacle_active = false;
+                leds.setMode(LedMode::IDLE);
+                Serial.printf("[OBSTACLE] Dégagé — distance=%u mm — retour IDLE\n", dist);
+            }
+        }
+
+        // Log périodique de la distance (toutes les 500ms)
+        if (millis() - last_log_ms > 500) {
+            Serial.printf("[TOF] dist=%u mm  valid=%d  obstacle=%d\n",
+                          dist, valid, obstacle_active);
+            last_log_ms = millis();
         }
     }
 
-    // Mise à jour IMU
+    // ── 2. IMU ───────────────────────────────────────────────────────────────
     if (hw_imu) {
         imu.update();
     }
 
-    // Suivi objet par caméra
+    // ── 3. Suivi objet par caméra ────────────────────────────────────────────
     if (hw_camera && tracker.isTracking()) {
-        leds.setMode(LedMode::TRACKING);
-        float vx = 0.0f, vy = 0.0f;
-        tracker.track(&vx, &vy);
-        mecanum.setVelocity(vx, vy, 0.0f);
+        if (!obstacle_active) {
+            leds.setMode(LedMode::TRACKING);
+            float vx = 0.0f, vy = 0.0f;
+            tracker.track(&vx, &vy);
+            mecanum.setVelocity(vx, vy, 0.0f);
+        }
     }
 
-    // Télémétrie web toutes les 500ms
+    // ── 4. Télémétrie web toutes les 500ms ───────────────────────────────────
     if (millis() - last_sensor_send > 500) {
-        uint16_t f = hw_tof ? 9999 : 0;  // 0 si TOF absent (pour éviter les valeurs invalides)
-        float roll = hw_imu ? imu.getRoll() : 0.0f;
+        uint16_t f = 9999;
+        float roll  = hw_imu ? imu.getRoll()  : 0.0f;
         float pitch = hw_imu ? imu.getPitch() : 0.0f;
         if (hw_tof) tof.readDistance(&f);
         web.sendSensorData(f, 0, 0, roll, pitch);
         last_sensor_send = millis();
     }
 
-    // Animation LEDs
+    // ── 5. Animation LEDs ────────────────────────────────────────────────────
     leds.update();
 }

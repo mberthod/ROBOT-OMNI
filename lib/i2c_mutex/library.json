@@ -1,0 +1,6 @@
+{
+  "name": "i2c_mutex",
+  "version": "1.0.0",
+  "description": "Mutex FreeRTOS global pour accès thread-safe au bus I2C",
+  "frameworks": "arduino"
+}

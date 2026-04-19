@@ -9,6 +9,7 @@
 #include "imu_sensor.h"
 #include <Adafruit_MPU6050.h>
 #include <cmath>
+#include "i2c_mutex.h"
 
 /**
  * @brief Initialise MPU6050 et calibre les offsets gyro (100 mesures)
@@ -90,7 +91,9 @@ bool ImuSensor::begin(TwoWire& wire) {
  */
 void ImuSensor::update() {
     sensors_event_t a, g, temp;
+    if (!g_i2c_mutex || !I2C_LOCK(20)) return;
     imu.getEvent(&a, &g, &temp);
+    I2C_UNLOCK();
 
     // Offsets gyro corrigés (rad/s)
     float gx = g.gyro.x - gyro_offset_x;
@@ -119,7 +122,9 @@ void ImuSensor::update() {
  */
 float ImuSensor::getYawRate() {
     sensors_event_t a, g, temp;
+    if (!g_i2c_mutex || !I2C_LOCK(20)) return 0.0f;
     imu.getEvent(&a, &g, &temp);
+    I2C_UNLOCK();
     return (g.gyro.z - gyro_offset_z) * 180.0f / M_PI;
 }
 
